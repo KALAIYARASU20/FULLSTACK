@@ -1,62 +1,40 @@
-from flask import Flask, render_template, request, jsonify
-from flask_sqlalchemy import SQLAlchemy
+import streamlit as st
 import pickle
-from sklearn.metrics.pairwise import cosine_similarity
 
-app = Flask(__name__)
+movies = pickle.load(open("model/movies.pkl", "rb"))
+similarity = pickle.load(open("model/similarity.pkl", "rb"))
 
-# Database setup
-app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///chatbot.db'
-db = SQLAlchemy(app)
+def recommend(movie_title):
+    index = movies[movies["title"] == movie_title].index[0]
 
-class ChatHistory(db.Model):
-    id = db.Column(db.Integer, primary_key=True)
-    user_msg = db.Column(db.String(500))
-    bot_reply = db.Column(db.String(500))
+    scores = []
+    for i in range(len(similarity[index])):
+        score = similarity[index][i]
+        scores.append((i, score))
 
-with app.app_context():
-    db.create_all()
+    scores.sort(key=lambda x : x[1], reverse=True)
 
-# Load ML model
-model = pickle.load(open("model.pkl","rb"))
-vectorizer = model["vectorizer"]
-X = model["X"]
-answers = model["answers"]
-questions = model["questions"]
+    top5 = scores[1:6]
 
-def chatbot_response(user_text):
-    user_vec = vectorizer.transform([user_text])
-    similarity = cosine_similarity(user_vec, X)
-    chatbot = similarity.argmax()
-    return answers[chatbot]
+    titles = []
+    posters = []
+
+    for item in top5:
+        titles.append(movies.iloc[item[0]].title)
+        posters.append(movies.iloc[item[0]].poster)
+
+    return titles, posters
 
 
-# Routes
-@app.route("/")
-def index():
-    return render_template("chatbot.html")
+st.title("🎬 Movie Recommender")
 
-@app.route("/chat", methods=["POST"])
-def chat():
-    data = request.get_json()
-    user_msg = data["message"]
-    bot_reply = chatbot_response(user_msg)
+selected_movie = st.selectbox("Select a movie", sorted(movies["title"].values))
 
-    # Save chat to DB
-    chat_entry = ChatHistory(user_msg=user_msg, bot_reply=bot_reply)
-    db.session.add(chat_entry)
-    db.session.commit()
+if st.button("Recommend"):
+    titles, posters = recommend(selected_movie)
+    cols = st.columns(5)
 
-    return jsonify({"response": bot_reply})
-
-
-# URL Building + Variable Rule Example
-@app.route("/history/<int:limit>")
-def history(limit):
-    chats = ChatHistory.query.limit(limit).all()
-    output = [{"user": c.user_msg, "bot": c.bot_reply} for c in chats]
-    return jsonify(output)
-
-
-if __name__ == "__main__":
-    app.run(debug=True)
+    for i in range(5):
+        with cols[i]:
+            st.image(posters[i])
+            st.caption(titles[i])
